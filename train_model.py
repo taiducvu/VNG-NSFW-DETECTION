@@ -153,11 +153,16 @@ def train_resnet():
         x = tf.placeholder(tf.float32, (None, 224, 224, 3), name='input_features')
         y_ = tf.placeholder(tf.int32, (None,), name='labels')
 
+        val_x = tf.placeholder(tf.float32, (None, 224, 224, 3), name='validate_features')
+        val_y = tf.placeholder(tf.int32, (None,), name='validate_labels')
+
         tr_samples, tr_labels = dt.input_data(batch_ls, FLAGS.batch_size)
 
         val_samples, val_labels = dt.input_data([val_path], FLAGS.val_batch_size, False)
 
         logit = md.inference_resnet(x, is_training=False, is_log=FLAGS.is_logging)
+
+        val_logit = md.inference_resnet(val_x, is_training=False, reuse=True, is_log=FLAGS.is_logging)
 
         # Define variables to output the predict of model and to evaluate one
         resnet_var_ls = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='resnet_v1_50')
@@ -168,11 +173,19 @@ def train_resnet():
 
         loss = md.loss(logit, y_, resnet_weight_ls)
 
+        val_loss = md.loss(val_logit, val_y, resnet_weight_ls)
+
         hat_y = tf.arg_max(logit, 1, name='predict_label')
+
+        val_pre_y = tf.arg_max(val_logit, 1, name='val_predict_label')
 
         correct_pre = tf.equal(tf.cast(hat_y, tf.int32), y_)
 
+        val_correct_predict = tf.equal(tf.cast(val_pre_y, tf.int32), val_y)
+
         accuracy = tf.reduce_mean(tf.cast(correct_pre, tf.float32))
+
+        val_accuracy = tf.reduce_mean(tf.cast(val_correct_predict, tf.float32))
 
         tf.summary.scalar('train_loss', loss) # Log the value of the train loss
         tf.summary.scalar('accuracy', accuracy) # Log the accuracy
@@ -214,8 +227,8 @@ def train_resnet():
         ###################################################################################
 
         # ----------------------------------- TENSORBOARD --------------------------------
-        merged = tf.summary.merge_all()
-        train_writer = tf.train.SummaryWriter(FLAGS.summaries_dir + '/train', graph=g)
+        # merged = tf.summary.merge_all()
+        # train_writer = tf.train.SummaryWriter(FLAGS.summaries_dir + '/train', graph=g)
         # test_writer = tf.train.SummaryWriter(FLAGS.summaries_dir + '/test')
 
         coord = tf.train.Coordinator()
@@ -255,29 +268,32 @@ def train_resnet():
                 print(format_str % (idx, loss_value, examples_per_sec, sec_per_batch))
 
                 mean_acc = 0
+                mean_val_acc = 0
                 mean_tr_loss = 0
+                mean_val_loss = 0
+
                 if (idx + 1) % steps_per_epoch == 0 or idx == 0:
                     # Logging the performance of model in training process
                     if FLAGS.use_val and FLAGS.is_logging:
-                        # val_iter = int(math.ceil(FLAGS.num_val_sample)/FLAGS.val_batch_size)
-                        #
-                        # for i in range(val_iter):
-                        #     v_x, v_y = sess.run([val_samples, val_labels])
-                        #
-                        #     val_acc, val_loss, summary = sess.run([accuracy, v_loss, merged], feed_dict={x:tr_x,
-                        #                                                                 y_:tr_y,
-                        #                                                                 val_x: v_x,
-                        #                                                                 val_y: v_y})
-                        #     train_writer.add_summary(summary, idx)  # Log
-                        #     if i == 0:
-                        #         mean_val_acc = val_acc
-                        #         mean_val_loss = val_loss
-                        #
-                        #     else:
-                        #         mean_val_acc = 1.0/(i + 1)*(val_acc + i*mean_val_acc)
-                        #         mean_val_loss = 1.0/(i + 1)*(val_loss + i*mean_val_loss)
-                        #
-                        # print('Validation accuracy: %0.2f'%mean_val_acc)
+                        val_iter = int(math.ceil(FLAGS.num_val_sample)/FLAGS.val_batch_size)
+
+                        for i in range(val_iter):
+                            v_x, v_y = sess.run([val_samples, val_labels])
+
+                            val_acc, val_err = sess.run([val_accuracy, val_loss], feed_dict={x: tr_x,
+                                                                                             y_: tr_y,
+                                                                                             val_x: v_x,
+                                                                                             val_y: v_y})
+                            # train_writer.add_summary(summary, idx)  # Log
+                            if i == 0:
+                                mean_val_acc = val_acc
+                                mean_val_loss = val_err
+
+                            else:
+                                mean_val_acc = 1.0/(i + 1)*(val_acc + i*mean_val_acc)
+                                mean_val_loss = 1.0/(i + 1)*(val_err + i*mean_val_loss)
+
+                        print('Validation accuracy: %0.2f'%mean_val_acc)
 
                         for i in range(steps_per_epoch):
                             eval_tr_x, eval_tr_y = sess.run([tr_samples, tr_labels])
@@ -303,7 +319,7 @@ def train_resnet():
                             csv_writer = csv.writer(csvfile, delimiter=',',
                                                     quotechar='|', quoting=csv.QUOTE_MINIMAL)
 
-                            csv_writer.writerow([idx, mean_tr_loss, mean_acc])
+                            csv_writer.writerow([idx, mean_tr_loss, mean_val_loss, mean_acc, mean_val_acc])
 
                             print('Finish writing!')
                         # ---------------------------- END ------------------------------------

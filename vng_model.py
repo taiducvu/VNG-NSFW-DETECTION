@@ -143,7 +143,7 @@ def inference(features):
     with tf.variable_scope('softmax_linear') as scope:
         weights = _variable_with_weight_decay('weights',
                                               [1024, NUM_CLASSES],
-                                              stddev= 1/1024.0, wd=0.0)
+                                              stddev= 1/1024.0, wd=FLAGS.weight_decay)
         biases = _initialize_variable('biases',
                                        [NUM_CLASSES],
                                        tf.constant_initializer(0.0))
@@ -153,7 +153,7 @@ def inference(features):
     return softmax_linear
 
 
-def loss(logits, labels, resnet_var_ls=None):
+def loss(logits, labels, resnet_var_ls=None, is_training=True):
     """
         The function compute the cross-entropy function between the output of model and
     the real label of training sample.
@@ -163,17 +163,34 @@ def loss(logits, labels, resnet_var_ls=None):
     :return:
     a tensor of size [None,]
     """
-    if resnet_var_ls is not None:
-        for var in resnet_var_ls:
-            weight_decay = tf.mul(tf.nn.l2_loss(var), 0.0)
-            tf.add_to_collection('losses', weight_decay)
+    if is_training:
+        if resnet_var_ls is not None:
+            for var in resnet_var_ls:
+                weight_decay = tf.mul(tf.nn.l2_loss(var), FLAGS.weight_decay)
+                tf.add_to_collection('losses', weight_decay)
 
-    labels = tf.cast(labels, tf.int64)
-    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, labels, name='cross_entropy_per_example')
-    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-    tf.add_to_collection('losses', cross_entropy_mean)
+        labels = tf.cast(labels, tf.int64)
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, labels, name='cross_entropy_per_example')
+        cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
+        tf.add_to_collection('losses', cross_entropy_mean)
 
-    return tf.add_n(tf.get_collection('losses'), name='total_loss')
+        return tf.add_n(tf.get_collection('losses'), name='total_loss')
+
+    else:
+        if resnet_var_ls is not None:
+            for var in resnet_var_ls:
+                weight_decay = tf.mul(tf.nn.l2_loss(var), FLAGS.weight_decay)
+                tf.add_to_collection('val_losses', weight_decay)
+
+        labels = tf.cast(labels, tf.int64)
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, labels, name='val_cross_entropy')
+        cross_entropy_mean = tf.reduce_mean(cross_entropy, name='val_cross_entropy')
+        tf.add_to_collection('val_losses', cross_entropy_mean)
+
+        return tf.add_n(tf.get_collection('val_losses'), name='val_total_loss')
+
+
+
 
 
 def inference_resnet(features, is_training=True, reuse=None, is_log=None):
